@@ -12,7 +12,7 @@ def create_pool(loop,**kw):
     #kw是一个dict
     logging.info('create database connection pool...')
     global __pool
-    __pool=yield from aiomysql.create_pool(
+    __pool = yield from aiomysql.create_pool(
         #yield from个人理解就是用协程，返回的结果还是后面函数的返回结果，这里__pool得到的就是一个pool对象
         # dict.get(key, default),如果key存在，就返回对应值，不存在就返回default这个的值
         host=kw.get('host','localhost'),# 数据库服务器的位置,设在本地

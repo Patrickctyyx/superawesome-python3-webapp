@@ -197,8 +197,8 @@ def add_static(app):
 # 将处理函数注册到app上
 # 处理将针对http method 和path进行
 def add_route(app,fn):
-    method = getattr(fn,"__method__", None)# 获取fn.__method__属性，若不存在就返回None
-    path = getattr(fn,"__route__", None)
+    method = getattr(fn, "__method__", None)# 获取fn.__method__属性，若不存在就返回None
+    path = getattr(fn, "__route__", None)
     # http method或path位置，将无法进行处理，因此报错
     if path is None or method is None:
         raise ValueError("@get or @post not defined in %s" % str(fn))
