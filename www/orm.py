@@ -211,13 +211,75 @@ class Model(dict,metaclass=ModelMetaclass):
         #**kw是关键字参数，kw接收的是一个dict。
         #使用*args和**kw是Python的习惯写法，当然也可以用其他参数名，但最好使用习惯用法
 
+    @classmethod
+    @asyncio.coroutine
+    def findAll(cls, where=None, args=None, **kw):
+        sql = [cls.__select__]
+        # 我们定义的默认的select语句是通过主键查询，不包括where语句
+        # 如果制定有where，需要在select中追加关键词
+        if where:
+            sql.append('where')
+            sql.append(where)
+        if args is None:
+            args=[]
+        # 桶where，orderBy也通过关键词传入
+        orderBy = kw.get('orderBy', None)
+        if orderBy:
+            sql.append('order by')
+            sql.append(orderBy)
+        # limit也是
+        limit = kw.get('limit', None)
+        if limit is not None:
+            sql.append('limit')
+            if isinstance(limit, int):
+                sql.append('?')
+                args.append(limit)
+            elif isinstance(limit, tuple) and len(limit) == 2:
+                sql.append('?, ?')
+                args.extend(limit)
+            else:
+                raise ValueError('Invalid limit value: %s' % str(limit))
+        rs = yield from select(' '.join(sql), args)
+        return [cls(**r) for r in rs]
+
+    @classmethod
+    @asyncio.coroutine
+    def findNumber(cls, selectField, where=None, args=None):
+        sql = ["selsct %s _num_ from '%s'" % (selectField, cls.__table__)]
+        if where:
+            sql.append('where')
+            sql.append(where)
+        rs = yield from select(' '.join(sql), args, 1)
+        if len(rs) == 0:
+            return None
+        return rs[0]['_num_']
+
     @asyncio.coroutine
     def save(self):
-        args = list(map(self.getValueOrDefault, self.__fields__))
+        # 我们在定义__insert__的时候，将主键放在了末尾，因为属性与值要一一对应，因此通过append将主键家在最后
+        args = list(map(self.getValueOrDefault, self.__fields__))# 使用getValueOrDefault方法，可以用time.time这样的函数来取值
         args.append(self.getValueOrDefault(self.__primary_key__))
         rows = yield from execute(self.__insert__, args)
         if rows != 1:
             logging.warning('failed to insert record: affected rows: %s' % rows)
+
+    @asyncio.coroutine
+    def update(self):
+        # 像time.time，next_id这样的函数在茶如的时候已经调用过了，没有其他需要实时更新的值，因此调用getValue
+        args = list(map(self.getValue, self.__fields__))
+        args.append(self.getValue(self.__primary_key__))
+        rows = yield from execute(self.__update__, args)
+        if rows != 1:
+            logging.warning('failed to update by primary key: affected rows: %s' % rows)
+
+    @asyncio.coroutine
+    def remove(self):
+        args = [self.getValue(self.__primary_key__)] # 取得主键作为参数
+        rows = yield from execute(self.__delete__, args) # 调用默认的delete语句
+        if rows != 1:
+            logging.warning('failed to remove by primary key: affected rows: %s' % rows)
+
+
 
 
 
