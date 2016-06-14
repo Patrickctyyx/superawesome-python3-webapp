@@ -6,7 +6,7 @@ def next_id():
     # uuid4()以随机方式生成uuid,hex属性将uuid转为32位的16进制数
     return '%015d%s000' % (int(time.time() * 1000), uuid.uuid4().hex)
 
-class User():
+class User(Model):
     # __table__的值将在创建类时被映射为表名
     __table__='users'
 
