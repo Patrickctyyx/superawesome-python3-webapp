@@ -52,7 +52,7 @@ def get_required_kw_args(fn):
             args.append(name)
     return tuple(args)
 
-#获取命名关键字参数
+# 获取命名关键字参数
 def get_named_kw_args(fn):#kw一般指关键字参数
     args = []
     # 获取函数fn的全部参数
@@ -103,7 +103,7 @@ class RequestHandler(object):
         self._app = app# 网页应用
         self._func = fn# handler
 
-        #一些上面定义的判断函数与获取函数
+        # 一些上面定义的判断函数与获取函数
         self._has_request_arg = has_request_arg(fn)
         self._has_var_kw_arg = has_var_kw_arg(fn)
         self._has_named_kw_args = has_named_kw_args(fn)
@@ -185,11 +185,11 @@ class RequestHandler(object):
         except APIError as e:
             return dict(error = e.error, data = e.data, message = e.message)
 
+# 将本文件同目录下的static目录(即www/static/)加入到应用的路由管理器中
 def add_static(app):
     # os.path.abspath(__file__), 返回当前脚本的绝对路径(包括文件名)
     # os.path.dirname(), 去掉文件名,返回目录路径
     # os.path.join(), 将分离的各部分组合成一个路径名
-    # 因此以下操作就是将本文件同目录下的static目录(即www/static/)加入到应用的路由管理器中
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
     app.router.add_static("/static/", path)
     logging.info("add static %s => %s" % ("/static/", path))
