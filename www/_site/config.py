@@ -1,40 +1,35 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-'读取配置文件,优先从conffig_override.py读取'
+'配置文件'
 
-__author__ = 'Engine' 
+__author__ = 'Patrick'
 
 import config_default
 
-# 自定义字典
 class Dict(dict):
-
+    '''
+    Simple dict but support access as x.y style.
+    '''
     def __init__(self, names=(), values=(), **kw):
-        '''
-        initial funcion.
-        names: key in dict
-        values: value in dict
-        '''
         super(Dict, self).__init__(**kw)
-        # 建立键值对关系
+        # 建立key和value对应关系
         for k, v in zip(names, values):
             self[k] = v
 
-    # 定义描述符,方便通过点标记法取值,即a.b
+    # 定义描述符，方便通过点标记法取值，比如a.b
     def __getattr__(self, key):
         try:
             return self[key]
         except KeyError:
             raise AttributeError(r"'Dict' object has no attribute '%s'" % key)
 
-    # 定义描述符,方便通过点标记法设值,即a.b=c
+    # 定义描述符，方便通过点标记法设值，比如a.b=c
     def __setattr__(self, key, value):
         self[key] = value
 
-# 将默认配置文件与自定义配置文件进行混合
+# 将默认配置文件与自定义配置文件混合
 def merge(defaults, override):
-    r = {} # 创建一个空的字典,用于配置文件的融合,而不对任意配置文件做修改
+    r = {}# 创建一个空的字典,用于配置文件的融合,而不对任意配置文件做修改
     # 1) 从默认配置文件取key,优先判断该key是否在自定义配置文件中有定义
     # 2) 若有,则判断value是否是字典,
     # 3) 若是字典,重复步骤1
@@ -45,28 +40,29 @@ def merge(defaults, override):
                 r[k] = merge(v, override[k])
             else:
                 r[k] = override[k]
-        # 当前key只在默认配置文件中有定义的, 则从其中取值设值
+        # 当前key在默认文件中有定义的，就从其中取值设值
         else:
             r[k] = v
-    return r # 返回混合好的新字典
+    return r
 
-# 将内建字典转换成自定义字典类型
+# 将内建dict换成自定义Dict
 def toDict(d):
     D = Dict()
     for k, v in d.items():
-        # 字典某项value仍是字典的(比如"db"),则将value的字典也转换成自定义字典类型
+        # dict中某项value仍为dict的，如db，则将value的dict也转换成Dict
         D[k] = toDict(v) if isinstance(v, dict) else v
     return D
 
-# 取得默认配置文件的配置信息
+# 获得默认配置文件的配置信息
 configs = config_default.configs
 
 try:
-    # 导入自定义配置文件,并将默认配置与自定义配置进行混合
+    # 导入自定义配置文件，并将其与默认配置文件混合
     import config_override
     configs = merge(configs, config_override.configs)
 except ImportError:
     pass
 
-# 最后将混合好的配置字典专程自定义字典类型,方便取值与设值
+# 最后将混合好的dict转化为Dict，方便取值和设值
 configs = toDict(configs)
+

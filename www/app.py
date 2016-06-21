@@ -7,6 +7,10 @@ __author__ = 'Patrick'
 
 import logging;logging.basicConfig(level = logging.INFO)
 
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(message)s', # 显示日期
+                    datefmt='[%Y-%m-$d %H:%M%S]')
+
 import asyncio, os, json, time
 from datetime import datetime
 
@@ -15,6 +19,7 @@ from jinja2 import Environment, FileSystemLoader
 
 import orm
 from coroweb import add_routes, add_static
+from handlers import cookie2user, COOKIE_NAME
 
 # 选择jinja2作为模板，初始化模板
 def init_jinja2(app, **kw):
@@ -58,6 +63,22 @@ async def logger_factory(app, handler):
         # 日志记录完毕后，调用传入的handler继续处理请求
         return (await handler(request))
     return logger
+
+async def auth_factory(app, handler):
+    async def auth(request):
+        logging.info('check user:%s %s' % (request.method, request.path))
+        request.__user__ = None
+        cookie_str = request.cookies.get(COOKIE_NAME) # 通过cookie名取得加密cookie字符串
+        if cookie_str:
+            user = await cookie2user(cookie_str) # 验证cookie并得到用户信息
+            if user:
+                logging.info('set current user: %s' % user.email)
+                request.__user__ = user # 将用户信息绑定到请求上
+        # 请求的路径是管理界面，但用户不是管理员，将会重新定位到登陆界面
+        if request.path.startswitch('/manage/') and (request.__user__ is None or not request.__user__.admin):
+            return web.HTTPFound('/signin')
+        return (await handler(request))
+    return auth
 
 # 解析数据
 async def data_factory(app, handler):
@@ -154,7 +175,7 @@ def datetime_filter(t):
 # loop指的是循环线程
 async def init(loop):
     # 创建全局数据库连接池
-    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='www', password='www', db='awesome')
+    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='www-data', password='www-data', db='awesome')
     # 创建web应用
     app = web.Application(loop = loop, middlewares=[
         logger_factory, response_factory
@@ -164,7 +185,7 @@ async def init(loop):
     # 设置模板为jinja2，并用时间为过滤器
     init_jinja2(app, filters=dict(datetime=datetime_filter))
     # 注册所有url处理函数
-    add_routes(app, "handlers")
+    add_routes(app, 'handlers')
     # 将当前目录下的static目录加入app目录
     add_static(app)
     # 调用子协程:创建一个TCP服务器,绑定到"127.0.0.1:9000"socket,并返回一个服务器对象

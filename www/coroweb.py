@@ -99,7 +99,7 @@ def has_request_arg(fn):
 # RequestHandler的目的是从url中分析所需要提取的参数，从request中获取必要的参数
 # 调用url参数，将结果转化为web.Response
 class RequestHandler(object):
-    def __int__(self, app, fn):
+    def __init__(self, app, fn):
         self._app = app# 网页应用
         self._func = fn# handler
 
@@ -196,7 +196,7 @@ def add_static(app):
 
 # 将处理函数注册到app上
 # 处理将针对http method 和path进行
-def add_route(app,fn):
+def add_route(app, fn):
     method = getattr(fn, "__method__", None)# 获取fn.__method__属性，若不存在就返回None
     path = getattr(fn, "__route__", None)
     # http method或path位置，将无法进行处理，因此报错

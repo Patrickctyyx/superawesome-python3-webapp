@@ -11,16 +11,43 @@ import logging
 import hashlib
 import base64
 import asyncio
+import markdown2
 from aiohttp import web
 from coroweb import get, post
 from models import User, Comment, Blog, next_id
-from apis import APIError, APIValueError, APIResourceNotFoundError
+from apis import APIError, APIValueError, APIResourceNotFoundError, APIPermissionError, Page
 from config import configs
 
 # 此处所有的handler都会在app.py中通过add_routes自动注册到app.router上
 
 COOKIE_NAME = 'awesome'
 _COOKIE_KEY = configs.session.secret
+
+# 验证用户身份
+def check_admin(request):
+    # 检查用户是不会是管理员
+    # 对于登录的用户，检查admin属性，管理员的为真
+    if request.__user__ is None or not request.__user__.admin:
+        raise APIPermissionError()
+
+# 取得页码
+def get_page_index(page_str):
+    # 检查传入字符的合法性
+    p = 1
+    try:
+        p = int(page_str)
+    except ValueError as e:
+        pass
+    if p < 1:
+        return p
+
+# 文本变成html
+def text2html(text):
+    # 先用filter函数睿输入的文本进行过滤处理，断行，去除首尾空白字符
+    # 再用map函数对特殊符号进行转换，在字符串装入html的<p>中
+    lines = map(lambda s: '<p>%s</p>' % s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;', filter(lambda s: s.strip() != '', text.spilt('\n'))))
+    # lines是一个字符串list，将其组装成一个字符串表示html的段落
+    return ''.join(lines)
 
 # 通过用户信息计算加密cookie
 def user2cookie(user, max_age):
@@ -98,9 +125,82 @@ def signin():
         '__template__': 'signin.html'
     }
 
-#　用户信息接口，用于返回机器能识别的用户信息
+# 用户登出
+@get('/signout')
+def signout(request):
+    # 请求头部的referer，表示上一个界面
+    # 用户等出时，实际转到了/signout路径下，因此为了使登出没有违和感，获得“当前”url
+    referer = request.headers.get('Referer')
+    r = web.HTTPFound(referer or '/')
+    r.set_cookie(COOKIE_NAME, '-deleted-', max_age=0, httponly=True)
+    logging.info('user signed out.')
+    return r
+
+# 博客详情页
+@get('/blog/{id}')
+def get_blog(id):
+    blog = yield from Blog.find(id) # 通过id从数据库拉取博客信息
+    # 从数据库拉取指定blog的所有评论，按时间顺序降序排序
+    comments = yield from Comment.findAll('blog_id=?', [id], orderBy='created_at desc')
+    # 将每条评论都转化成html格式
+    for c in comments:
+        c.html_content = text2html(c.content)
+    blog.html_content = markdown2.markdown(blog.content) # blog是markdown格式，转化成html
+    return {
+        # 返回的参数将在jinja2模板中被解析
+        '__template__': 'blog.html',
+        'blog': blog,
+        'comments': comments
+    }
+
+# 写博客的界面
+@get('/manage/blogs/create')
+def manage_create_blog():
+    return {
+        '__template__': 'manage_blog_edit.html',
+        'id': '', # id传给js变量I
+        # action传给js变量action
+        # 将在用户提交博客的时候将数据post到action指定的路径，此处即为博客创建的api
+        'action': '/api/blogs'
+    }
+
+# 修改博客的界面
+@get('/manage/')
+def manage():
+    return 'redirect:/manage/comments'
+
+# 管理博客的页面
+@get('/manage/blogs')
+def manage_blogs(*, page='1'): # 管理界面默认从1开始
+    return {
+        '__template__': 'manage_blogs.html',
+        'page_index': get_page_index(page) # 通过page_index来显示分页
+    }
+
+# 管理评论的界面
+@get('/manage/comments')
+def manage_comments(*, page='1'):
+    return {
+        '__template__': 'manage_comments.html',
+        'page_index': get_page_index(page) # 通过page_index来显示分页
+    }
+
+# 管理用户的界面
+@get('/manage/users')
+def manage_comments(*, page='1'):
+    return {
+        '__template__': 'manage_users.html',
+        'page_index': get_page_index(page) # 通过page_index来显示分页
+    }
+
+#　API:用户信息接口,用于返回机器能识别的用户信息,获取用户信息
 @get('/api/users')
-def api_get_users():
+def api_get_users(*, page='1'):
+    page_index = get_page_index(page)
+    num = yield from User.findNumber('count(id)')
+    p = Page(num, page_index)
+    if num == 0:
+        return dict(page=p, users=())
     users = yield from User.findAll(orderBy='created_at desc')
     for u in users:
         u.passwd = '******'
@@ -110,7 +210,7 @@ def api_get_users():
 _RE_EMAIL = re.compile(r'^[a-z0-9\.\-\_]+\@[a-z0-9\-\_]+(\.[a-z0-9\-\_]+){1,4}$')
 _RE_SHA1 = re.compile(r'[0-9a-f]{40}$')
 
-# 这是实现用户注册的api，注册到/api/users路径上，http method为post
+# API:这是实现用户注册的api，注册到/api/users路径上，http method为post
 @post('/api/users')
 def api_register_user(*, name, email, passwd):
     # 验证输入的正确性
@@ -181,10 +281,100 @@ def authenticate(*, email, passwd):
     r.body = json.dumps(user, ensure_ascii=False).encode("utf-8")
     return r
 
-@get('/signout')
-def signout(request):
-    referer = request.headers.get('Referer')
-    r = web.HTTPFound(referer or '/')
-    r.set_cookie(COOKIE_NAME, '-deleted-', max_age=0, httponly=True)
-    logging.info('user signed out')
-    return r
+# API:获取blogs
+@get('/api/blogs')
+def api_blogs(*, page='1'):
+    page_index = get_page_index(page)
+    num = yield from Blog.findNumber('count(id)') # num为博客总数
+    p =Page(num, page_index) # 创建page对象
+    if num ==0:
+        return dict(page=p, blogs=())
+    # 博客书不为0就从数据库中抓取博客
+    # limit强制select返回指定的记录数
+    blogs = yield from Blog.findAll(orderBy='created_at desc', limit=(p.offset, p.limit))
+    return dict(page=p, blogs=blogs) # 返回dict，以供response的中间件处理
+
+# API：获取单条日志
+@get('/api/blogs/{id}')
+def api_get_blog(*, id):
+    blog = yield from Blog.find(id)
+    return blog
+
+# API：创建blog
+@post('/api/blogs')
+def api_create_blog(request, *, name, summary, content):
+    check_admin(request) # 检查用户权限
+    # 验证博客信息的合法性
+    if not name or not name.strip():
+        raise APIValueError("name", "name cannot be empty")
+    if not summary or not summary.strip():
+        raise APIValueError("summary", "summary cannot be empty")
+    if not content or not content.strip():
+        raise APIValueError("content", "content cannot be empty")
+    # 创建博客对象
+    blog = Blog(user_id=request.__user__.id, user_name=request.__user__.name, user_image=request.__user__.image, name=name.strip(), summary=summary.strip(), content=content.strip())
+    yield from blog.save() # 储存博客入数据库
+    return blog # 返回博客信息
+
+# API：修改博客
+@post('/api/blogs/{id}')
+def api_update_blog(id, request, *, name, summary, content):
+    check_admin(request)
+    if not name or not name.strip():
+        raise APIValueError("name", "name cannot be empty")
+    if not summary or not summary.strip():
+        raise APIValueError("summary", "summary cannot be empty")
+    if not content or not content.strip():
+        raise APIValueError("content", "content cannot be empty")
+    blog = yield from Blog.find(id) # 获取修改前的博客
+    blog.name = name.strip()
+    blog.summary = summary.strip()
+    blog.content = content.strip()
+    yield from blog.update() # 更新博客
+    return blog
+
+# API:删除博客
+@post('/api/blogs/{id}/delete')
+def api_delete_blog(request, *, id):
+    check_admin(request)
+    # 根据model类的定义，只有查询才是类方法，其他删改都是实例方法
+    # 所以要先创建一个实例
+    blog = yield from Blog.find(id)
+    yield from blog.remove()
+    return dict(id=id) # 返回被删除博客的id
+
+# API：获取评论
+@get('/api/comments')
+def api_comments(*, page='1'):
+    page_index = get_page_index(page)
+    num = yield from Comment.findNumber('count(id)')
+    p = Page(num, page_index)
+    if num == 0:
+        return dict(page=p, comments=())
+    comments = yield from Comment.findAll(orderBy='created_at desc', limit=(p.offset, p.limit))
+    return dict(page=p, comments=comments)
+
+# API: 创建评论
+@post('/api/blogs/{id}/comments')
+def api_create_comment(id, request, *, content):
+    user = request.__user__
+    if user is None:
+        raise APIPermissionError('Please sign in first.')
+    if not content or not content.strip():
+        raise APIValueError('content', 'Content cannot be empty.')
+    blog = yield from Blog.find(id)
+    if blog is None:
+        raise APIResourceNotFoundError('Blog', 'No such a blog.')
+    comment = Comment(user_id=user.id, user_name=user.name, user_image=user.image, blog_id = blog.id, content=content.strip())
+    yield from content.save()
+    return comment
+
+# API:删除评论
+@post('/api/blogs/{id}/delete')
+def api_delete_comment(id, request):
+    check_admin(request)
+    comment = yield from Comment.find(id)
+    if comment is None:
+        raise APIResourceNotFoundError('Comment', 'No such a comment.')
+    yield from comment.remove()
+    return dict(id=id)
